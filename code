@@ -1,0 +1,67 @@
+pip install flask requests
+from flask import Flask, jsonify, request
+import requests
+import time
+import threading
+
+app = Flask(__name__)
+
+# Configuration
+WINDOW_SIZE = 10
+THIRD_PARTY_API_URL = "https://example.com/api/numbers/"  # Replace with actual third-party API
+
+# Global store for numbers (with threading lock for concurrency)
+number_window = []
+lock = threading.Lock()
+
+# Fetch number from the third-party API with a timeout
+def fetch_number(number_id):
+    try:
+        response = requests.get(f"{THIRD_PARTY_API_URL}{number_id}", timeout=0.5)  # 500ms timeout
+        if response.status_code == 200:
+            return response.json().get("number")
+    except requests.exceptions.RequestException:
+        return None
+    return None
+
+# Add number to the sliding window, ensuring no duplicates and maintaining window size
+def add_number_to_window(number):
+    with lock:
+        if number not in number_window:
+            if len(number_window) >= WINDOW_SIZE:
+                number_window.pop(0)  # Remove oldest number
+            number_window.append(number)
+
+# Calculate the average of the numbers in the window
+def calculate_average():
+    if len(number_window) == 0:
+        return 0.0
+    return sum(number_window) / len(number_window)
+
+@app.route('/numbers/<string:number_id>', methods=['GET'])
+def get_numbers(number_id):
+    # Save previous state of the window
+    prev_state = list(number_window)
+
+    # Fetch number from the third-party API
+    fetched_number = fetch_number(number_id)
+    
+    if fetched_number is not None:
+        # Add the number to the window
+        add_number_to_window(fetched_number)
+    
+    # Calculate the new average
+    average = calculate_average()
+    
+    # Response structure
+    response = {
+        "windowPrevState": prev_state,
+        "windowCurrState": list(number_window),
+        "numbers": [fetched_number] if fetched_number is not None else [],
+        "avg": round(average, 2)
+    }
+    
+    return jsonify(response)
+
+if __name__ == '__main__':
+    app.run(port=9876, debug=True)
